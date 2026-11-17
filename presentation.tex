@@ -245,71 +245,79 @@ print(s.model())                         # e.g. [Tie = False, Shirt = True]
 \end{frame}
 
 \begin{frame}[fragile]{CDCL(T) in Code (1/2) --- Abstraction Helpers (Fig.~13)}
-\begin{lstlisting}[style=py]
+\begin{lstlisting}[style=py,basicstyle=\ttfamily\tiny]
 index = 0
 def abstract_atom(abs, atom):
-    global index
+    # abs = dictionary: theory atom (e.g. x >= 0)  ->  Bool variable
     if atom in abs:
-        return abs[atom]
-    p = Bool("p%d" % index)
+        return abs[atom]      # seen this atom before: reuse its Bool
+    p = Bool("p%d" % index)   # else invent a fresh variable p0, p1, ...
     index += 1
-    abs[atom] = p
+    abs[atom] = p             # remember the atom <-> Bool correspondence
     return p
 
 def abstract_lit(abs, lit):
+    # a literal is an atom or its negation; abstract it consistently
     if is_not(lit):
         return Not(abstract_atom(abs, lit.arg(0)))
     return abstract_atom(abs, lit)
 
 def abstract_clause(abs, clause):
+    # clause = OR of theory literals -> OR of Bool literals
     return Or([abstract_lit(abs, lit) for lit in clause])
 
 def abstract_clauses(abs, clauses):
+    # whole formula: list of clauses -> pure Boolean clause list
     return [abstract_clause(abs, clause) for clause in clauses]
 
 def mk_lit(m, p):
+    # read the value of Bool p out of a model m:  True -> p, False -> Not p
     if is_true(m.eval(p)):
         return p
     else:
         return Not(p)
 \end{lstlisting}
-  {\scriptsize Verbatim from \emph{Programming Z3} (Fig.~13): maps every
-   theory atom to a fresh Boolean variable --- this builds the
-   propositional abstraction that the SAT core works on.}
+  {\scriptsize Code verbatim from \emph{Programming Z3} (Fig.~13); comments
+   added here. It maps every theory atom to a fresh Boolean variable ---
+   building the propositional abstraction the SAT core works on.}
 \end{frame}
 
 \begin{frame}[fragile]{CDCL(T) in Code (2/2) --- the Solver Loop (Fig.~12)}
-\begin{lstlisting}[style=py]
+\begin{lstlisting}[style=py,basicstyle=\ttfamily\tiny]
 def simple_cdclT(clauses):
+    # two solvers:  prop   = the SAT core (sees only Booleans)
+    #               theory = checks the real atoms (arithmetic, ...)
     prop   = Solver()
     theory = Solver()
-    abs = {}
+    abs = {}                                    # atom -> Bool variable
+    # SAT core receives the abstracted, pure-Boolean problem
     prop.add(abstract_clauses(abs, clauses))
+    # theory solver receives the link: each p is equivalent to its atom
     theory.add([p == abs[p] for p in abs])
     while True:
-        is_sat = prop.check()
+        is_sat = prop.check()          # 1. SAT core PROPOSES an assignment
         if sat == is_sat:
             m = prop.model()
+            # translate the Boolean assignment back into theory literals
             lits = [mk_lit(m, abs[p]) for p in abs]
+            # 2. ask the theory solver: is this assignment really consistent?
             if unsat == theory.check(lits):
-                prop.add(Not(And(theory.unsat_core())))   # learned clause!
+                # 3. NO: unsat_core() = the conflicting subset of lits
+                #    block exactly that combination -- a LEARNED clause:
+                prop.add(Not(And(theory.unsat_core())))
+                #    ^ the "learn -> backjump" step from the tree slide
             else:
+                # 4. consistent modulo theories -> genuine solution
                 print(theory.model())
                 return
         else:
-            print(is_sat)
+            print(is_sat)              # SAT core proved abstraction UNSAT
             return
 \end{lstlisting}
-  \begin{itemize}\itemsep1pt
-    \item Verbatim from \emph{Programming Z3} (\S6.1.1): the SAT
-          core proposes an assignment, the theory solver refutes
-          it, and \texttt{Not(And(theory.unsat\_core()))} is the
-          \emph{learned clause} blocking that failed combination
-          forever.
-    \item Every UNSAT verdict Z3 produces is accumulated from
-          exactly such learned blocks --- the pigeonhole analysis
-          counts how many of them the principle forces.
-  \end{itemize}
+  {\scriptsize Code verbatim from \emph{Programming Z3} (\S6.1.1, Fig.~12);
+   comments added. Steps 1--4 = propose, check, \alert{learn}, accept. The
+   pigeonhole analysis counts how many learned clauses (step 3) the
+   principle forces.}
 \end{frame}
 
 \begin{frame}[fragile]{Working Environment}
