@@ -105,6 +105,41 @@ def DPLL(clauses, assignment):
   \end{block}
 \end{frame}
 
+\begin{frame}{CDCL by Hand: a Complete Run on a Tiny UNSAT Formula}
+  \centering
+  {\small $C_1=(x_1 \lor x_2)\qquad C_2=(x_1 \lor \lnot x_2)\qquad
+          C_3=(\lnot x_1 \lor x_3)\qquad C_4=(\lnot x_1 \lor \lnot x_3)$}
+
+  \medskip
+  \begin{tikzpicture}[>=stealth,
+    box/.style={draw,rounded corners,fill=blue!8,align=center,font=\scriptsize,inner sep=3pt},
+    conflict/.style={draw,rounded corners,fill=red!12,align=center,font=\scriptsize\bfseries,inner sep=3pt},
+    learn/.style={align=center,font=\scriptsize,inner sep=2pt}]
+    \node[box] (root) at (4.2,4.2) {\textbf{decide} $x_1$};
+    \node[box] (L) at (2.1,2.9) {propagate $x_2{=}T$ \ (from $C_1$)\\ propagate $x_2{=}F$ \ (from $C_2$)};
+    \node[conflict] (Lc) at (2.1,1.7) {CONFLICT};
+    \node[learn] (Ll) at (2.1,0.95) {learn $(x_1)$\\ backjump to level 0};
+    \node[box] (R) at (6.4,2.9) {propagate $x_3{=}T$ \ (from $C_3$)\\ propagate $x_3{=}F$ \ (from $C_4$)};
+    \node[conflict] (Rc) at (6.4,1.7) {CONFLICT};
+    \node[learn] (Rl) at (6.4,1.0) {learn $(\lnot x_1)$};
+    \node[box,fill=orange!15] (bot) at (4.25,0.0) {$(x_1) \wedge (\lnot x_1) \;\Rightarrow\;$ empty clause $\Rightarrow$ \textbf{UNSAT}};
+    \draw[->,thick] (root) -- node[left,font=\scriptsize] {$x_1{=}F$} (L);
+    \draw[->,thick] (root) -- node[right,font=\scriptsize] {$x_1{=}T$} (R);
+    \draw[->,thick] (L) -- (Lc);
+    \draw[->,thick] (Lc) -- (Ll);
+    \draw[->,thick] (R) -- (Rc);
+    \draw[->,thick] (Rc) -- (Rl);
+    \draw[->,thick,dashed] (Ll) to[bend right=18] (bot);
+    \draw[->,thick,dashed] (Rl) to[bend left=18] (bot);
+  \end{tikzpicture}
+
+  \medskip
+  {\scriptsize The cycle: decide $\to$ propagate $\to$ conflict $\to$
+   \alert{learn} $\to$ backjump. Each learned clause prunes its branch
+   \emph{permanently} --- both subtrees die after one visit, and the two
+   learned clauses resolve to the empty clause.}
+\end{frame}
+
 \begin{frame}{Resolution: Why Some Formulas Stay Hard Forever}
   \begin{columns}[T]
     \begin{column}{0.52\textwidth}
@@ -165,32 +200,99 @@ def DPLL(clauses, assignment):
   \end{itemize}
 \end{frame}
 
-\begin{frame}[fragile]{The CDCL(T) Loop in 15 Lines}
+\begin{frame}[fragile]{Reading z3py --- the API Used Throughout (\emph{Programming Z3} \S2)}
 \begin{lstlisting}[style=py]
-def simple_cdclT(clauses):
-    prop, theory = Solver(), Solver()
-    abs = {}
-    prop.add(abstract_clauses(abs, clauses))   # atoms -> Bool vars
-    theory.add([p == abs[p] for p in abs])
-    while True:
-        if sat == prop.check():                # SAT core proposes...
-            m = prop.model()
-            lits = [mk_lit(m, abs[p]) for p in abs]
-            if unsat == theory.check(lits):    # ...theory disposes
-                prop.add(Not(And(theory.unsat_core())))  # learn!
-            else:
-                print(theory.model()); return  # sat
-        else:
-            print(unsat); return               # unsat
+from z3 import *
+Tie, Shirt = Bools('Tie Shirt')          # declare Boolean variables
+s = Solver()
+s.add(Or(Tie, Shirt),                    # constraints = assertions
+      Or(Not(Tie), Shirt),
+      Or(Not(Tie), Not(Shirt)))
+print(s.check())                         # sat / unsat / unknown
+print(s.model())                         # e.g. [Tie = False, Shirt = True]
 \end{lstlisting}
   \begin{itemize}\itemsep1pt
-    \item Condensed from \emph{Programming Z3} \S6.1.1 (Fig.~12):
-          the SAT core proposes an assignment, the theory solver
-          refutes it, and the refuted combination is blocked with
-          a \emph{learned clause} (\texttt{unsat\_core}).
+    \item \texttt{Bools / Bool / Ints / Int} --- declare variables;
+          \texttt{Or / And / Not / Implies} --- connectives;
+          \texttt{==} between Booleans means bi-implication.
+    \item \texttt{Solver()} accumulates constraints via
+          \texttt{s.add(...)}; \texttt{s.check()} decides;
+          \texttt{s.model()} extracts a satisfying assignment.
+    \item Theory constraints read like ordinary Python over
+          \texttt{Int}s: \texttt{0 <= h[i]}, \texttt{h[i] < n},
+          \texttt{Distinct(h)} --- exactly Encoding II later.
+    \item \texttt{s.set("timeout", ms)} --- per-solver cap (used by
+          the benchmark).
+    \item Example verbatim from \emph{Programming Z3} \S2 --- the
+          syntax the online CDCL(T) code on the next slides assumes.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{CDCL(T) in Code (1/2) --- Abstraction Helpers (Fig.~13)}
+\begin{lstlisting}[style=py]
+index = 0
+def abstract_atom(abs, atom):
+    global index
+    if atom in abs:
+        return abs[atom]
+    p = Bool("p%d" % index)
+    index += 1
+    abs[atom] = p
+    return p
+
+def abstract_lit(abs, lit):
+    if is_not(lit):
+        return Not(abstract_atom(abs, lit.arg(0)))
+    return abstract_atom(abs, lit)
+
+def abstract_clause(abs, clause):
+    return Or([abstract_lit(abs, lit) for lit in clause])
+
+def abstract_clauses(abs, clauses):
+    return [abstract_clause(abs, clause) for clause in clauses]
+
+def mk_lit(m, p):
+    if is_true(m.eval(p)):
+        return p
+    else:
+        return Not(p)
+\end{lstlisting}
+  {\scriptsize Verbatim from \emph{Programming Z3} (Fig.~13): maps every
+   theory atom to a fresh Boolean variable --- this builds the
+   propositional abstraction that the SAT core works on.}
+\end{frame}
+
+\begin{frame}[fragile]{CDCL(T) in Code (2/2) --- the Solver Loop (Fig.~12)}
+\begin{lstlisting}[style=py]
+def simple_cdclT(clauses):
+    prop   = Solver()
+    theory = Solver()
+    abs = {}
+    prop.add(abstract_clauses(abs, clauses))
+    theory.add([p == abs[p] for p in abs])
+    while True:
+        is_sat = prop.check()
+        if sat == is_sat:
+            m = prop.model()
+            lits = [mk_lit(m, abs[p]) for p in abs]
+            if unsat == theory.check(lits):
+                prop.add(Not(And(theory.unsat_core())))   # learned clause!
+            else:
+                print(theory.model())
+                return
+        else:
+            print(is_sat)
+            return
+\end{lstlisting}
+  \begin{itemize}\itemsep1pt
+    \item Verbatim from \emph{Programming Z3} (\S6.1.1): the SAT
+          core proposes an assignment, the theory solver refutes
+          it, and \texttt{Not(And(theory.unsat\_core()))} is the
+          \emph{learned clause} blocking that failed combination
+          forever.
     \item Every UNSAT verdict Z3 produces is accumulated from
-          exactly such learned blocks --- the analysis counts how
-          many of them the pigeonhole principle forces.
+          exactly such learned blocks --- the pigeonhole analysis
+          counts how many of them the principle forces.
   \end{itemize}
 \end{frame}
 
