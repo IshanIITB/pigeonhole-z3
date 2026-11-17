@@ -105,39 +105,55 @@ def DPLL(clauses, assignment):
   \end{block}
 \end{frame}
 
-\begin{frame}{CDCL by Hand: a Complete Run on a Tiny UNSAT Formula}
+\begin{frame}{Non-Chronological Backtracking: One Jump Kills a Subtree}
   \centering
-  {\small $C_1=(x_1 \lor x_2)\qquad C_2=(x_1 \lor \lnot x_2)\qquad
-          C_3=(\lnot x_1 \lor x_3)\qquad C_4=(\lnot x_1 \lor \lnot x_3)$}
+  {\small $C_1{=}(p \lor \lnot r)$,\; $C_2{=}(r \lor u)$,\;
+          $C_3{=}(r \lor \lnot u)$,\; $C_4{=}(\lnot p \lor q)$,\;
+          $C_5{=}(\lnot p \lor \lnot q)$ \quad --- \quad UNSAT}
 
   \medskip
   \begin{tikzpicture}[>=stealth,
-    box/.style={draw,rounded corners,fill=blue!8,align=center,font=\scriptsize,inner sep=3pt},
-    conflict/.style={draw,rounded corners,fill=red!12,align=center,font=\scriptsize\bfseries,inner sep=3pt},
-    learn/.style={align=center,font=\scriptsize,inner sep=2pt}]
-    \node[box] (root) at (4.2,4.2) {\textbf{decide} $x_1$};
-    \node[box] (L) at (2.1,2.9) {propagate $x_2{=}T$ \ (from $C_1$)\\ propagate $x_2{=}F$ \ (from $C_2$)};
-    \node[conflict] (Lc) at (2.1,1.7) {CONFLICT};
-    \node[learn] (Ll) at (2.1,0.95) {learn $(x_1)$\\ backjump to level 0};
-    \node[box] (R) at (6.4,2.9) {propagate $x_3{=}T$ \ (from $C_3$)\\ propagate $x_3{=}F$ \ (from $C_4$)};
-    \node[conflict] (Rc) at (6.4,1.7) {CONFLICT};
-    \node[learn] (Rl) at (6.4,1.0) {learn $(\lnot x_1)$};
-    \node[box,fill=orange!15] (bot) at (4.25,0.0) {$(x_1) \wedge (\lnot x_1) \;\Rightarrow\;$ empty clause $\Rightarrow$ \textbf{UNSAT}};
-    \draw[->,thick] (root) -- node[left,font=\scriptsize] {$x_1{=}F$} (L);
-    \draw[->,thick] (root) -- node[right,font=\scriptsize] {$x_1{=}T$} (R);
-    \draw[->,thick] (L) -- (Lc);
-    \draw[->,thick] (Lc) -- (Ll);
-    \draw[->,thick] (R) -- (Rc);
-    \draw[->,thick] (Rc) -- (Rl);
-    \draw[->,thick,dashed] (Ll) to[bend right=18] (bot);
-    \draw[->,thick,dashed] (Rl) to[bend left=18] (bot);
+    dec/.style={draw,rounded corners,fill=blue!10,align=center,font=\scriptsize,inner sep=2.5pt},
+    dead/.style={draw,rounded corners,fill=black!5,align=center,font=\scriptsize,inner sep=2.5pt,text=black!55},
+    conf/.style={draw,rounded corners,fill=red!12,align=center,font=\scriptsize\bfseries,inner sep=2.5pt},
+    note/.style={align=left,font=\scriptsize,inner sep=2pt}]
+    \node[dec] (A) at (5.4,5.0) {\textbf{decide} $p$ \ [L1]};
+    \node[dec] (B) at (2.3,4.0) {$p{=}F$ \ [L1]};
+    \node[dec] (C) at (8.7,4.0) {$p{=}T$ \ {\tiny (after learning $(p)$)}};
+    \node[dec] (D) at (2.3,3.0) {\textbf{decide} $u$ \ [L2]};
+    \node[dec] (E) at (1.4,2.2) {$u{=}T$};
+    \node[dead] (F) at (2.95,2.2) {$u{=}F$: never explored};
+    \node[dec] (G) at (1.4,1.5) {\textbf{decide} $r$ \ [L3]};
+    \node[conf] (H) at (0.55,0.65) {$r{=}T$: $C_1{=}(p{\lor}\lnot r)$\\ falsified};
+    \node[dead] (I) at (2.75,0.65) {$r{=}F$: discarded\\ {\tiny by backjump}};
+    \node[note,text width=4.6cm] (K) at (6.9,1.95) {learn $(p \lor \lnot r)$;
+      \alert{backjump L3 $\to$ L1} --- level 2 discarded, never explored!
+      At L1: $r{=}F$; \ $C_2{:}\ u{=}T$; \ $C_3$ falsified $\to$ \textbf{conflict};
+      learn $(p)$ $\to$ back to level 0};
+    \node[note,text width=2.9cm] (L) at (9.0,3.05) {$q{=}T$ $(C_4)$, $q{=}F$ $(C_5)$
+      $\to$ \textbf{conflict}; learn $(\lnot p)$};
+    \node[draw,rounded corners,fill=orange!20,font=\scriptsize\bfseries,align=center] (M) at (5.4,0.25)
+      {$(p) \wedge (\lnot p) \;\Rightarrow\;$ empty clause $\Rightarrow$ \textbf{UNSAT}};
+    \draw[->,thick] (A) -- node[left,font=\scriptsize] {$F$} (B);
+    \draw[->,thick] (A) -- node[right,font=\scriptsize] {$T$} (C);
+    \draw[->,thick] (B) -- (D);
+    \draw[->,thick] (D) -- node[left,font=\scriptsize] {$T$} (E);
+    \draw[->,thick] (D) -- node[right,font=\scriptsize] {$F$} (F);
+    \draw[->,thick] (E) -- (G);
+    \draw[->,thick] (G) -- node[left,font=\scriptsize] {$T$} (H);
+    \draw[->,thick] (G) -- node[right,font=\scriptsize] {$F$} (I);
+    \draw[->,thick,dashed,red] (H) to[bend left=28]
+      node[pos=0.35,left,font=\scriptsize,text=red] {backjump: skips L2} (B);
+    \draw[->,thick] (C) -- (L);
+    \draw[->,thick,dashed] (K) to[bend right=12] (M);
+    \draw[->,thick,dashed] (L) to[bend left=15] (M);
   \end{tikzpicture}
 
   \medskip
-  {\scriptsize The cycle: decide $\to$ propagate $\to$ conflict $\to$
-   \alert{learn} $\to$ backjump. Each learned clause prunes its branch
-   \emph{permanently} --- both subtrees die after one visit, and the two
-   learned clauses resolve to the empty clause.}
+  {\scriptsize A chronological (DPLL) solver would now grind through the
+   $u{=}F$ subtree. CDCL's learned clause $(p \lor \lnot r)$ proves $u$
+   irrelevant to the conflict --- the entire level-2 subtree is skipped
+   in one jump. The run still ends UNSAT.}
 \end{frame}
 
 \begin{frame}{Resolution: Why Some Formulas Stay Hard Forever}
